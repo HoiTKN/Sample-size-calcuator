@@ -5,7 +5,7 @@ import math
 
 # Set page config
 st.set_page_config(
-    page_title="Ứng Dụng QA Kiểm Tra Lùi Theo ISO-AQL",
+    page_title="Ứng Dụng QA Kiểm Tra Lùi Theo Phân Tầng Rủi Ro",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -46,71 +46,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ISO 2859-1 sampling tables (simplified version)
-# Dictionary format: {lot_size_code: {AQL: sample_size, ...}, ...}
-iso_sampling_table = {
-    'A': {0.065: 2, 0.1: 2, 0.15: 2, 0.25: 2, 0.4: 2, 0.65: 2, 1.0: 2, 1.5: 2, 2.5: 2, 4.0: 2, 6.5: 2},
-    'B': {0.065: 3, 0.1: 3, 0.15: 3, 0.25: 3, 0.4: 3, 0.65: 3, 1.0: 3, 1.5: 3, 2.5: 3, 4.0: 3, 6.5: 3},
-    'C': {0.065: 5, 0.1: 5, 0.15: 5, 0.25: 5, 0.4: 5, 0.65: 5, 1.0: 5, 1.5: 5, 2.5: 5, 4.0: 5, 6.5: 5},
-    'D': {0.065: 8, 0.1: 8, 0.15: 8, 0.25: 8, 0.4: 8, 0.65: 8, 1.0: 8, 1.5: 8, 2.5: 8, 4.0: 8, 6.5: 8},
-    'E': {0.065: 13, 0.1: 13, 0.15: 13, 0.25: 13, 0.4: 13, 0.65: 13, 1.0: 13, 1.5: 13, 2.5: 13, 4.0: 13, 6.5: 13},
-    'F': {0.065: 20, 0.1: 20, 0.15: 20, 0.25: 20, 0.4: 20, 0.65: 20, 1.0: 20, 1.5: 20, 2.5: 20, 4.0: 20, 6.5: 20},
-    'G': {0.065: 32, 0.1: 32, 0.15: 32, 0.25: 32, 0.4: 32, 0.65: 32, 1.0: 32, 1.5: 32, 2.5: 32, 4.0: 32, 6.5: 32},
-    'H': {0.065: 50, 0.1: 50, 0.15: 50, 0.25: 50, 0.4: 50, 0.65: 50, 1.0: 50, 1.5: 50, 2.5: 50, 4.0: 50, 6.5: 50},
-    'J': {0.065: 80, 0.1: 80, 0.15: 80, 0.25: 80, 0.4: 80, 0.65: 80, 1.0: 80, 1.5: 80, 2.5: 80, 4.0: 80, 6.5: 80},
-    'K': {0.065: 125, 0.1: 125, 0.15: 125, 0.25: 125, 0.4: 125, 0.65: 125, 1.0: 125, 1.5: 125, 2.5: 125, 4.0: 125, 6.5: 125},
-    'L': {0.065: 200, 0.1: 200, 0.15: 200, 0.25: 200, 0.4: 200, 0.65: 200, 1.0: 200, 1.5: 200, 2.5: 200, 4.0: 200, 6.5: 200},
-}
-
-# Acceptance criteria for AQLs (simplified)
-acceptance_criteria = {
-    0.065: 0, 0.1: 0, 0.15: 0, 0.25: 0, 
-    0.4: 0, 0.65: 1, 1.0: 1, 1.5: 2, 
-    2.5: 3, 4.0: 5, 6.5: 7
-}
-
-# Lot size to code mapping for General Inspection Level II
-lot_size_to_code = {
-    (2, 8): 'A',
-    (9, 15): 'B',
-    (16, 25): 'C',
-    (26, 50): 'D',
-    (51, 90): 'E',
-    (91, 150): 'F',
-    (151, 280): 'G',
-    (281, 500): 'H',
-    (501, 1200): 'J',
-    (1201, 3200): 'K',
-    (3201, 10000): 'L',
-    (10001, 35000): 'M',
-    (35001, 150000): 'N',
-    (150001, 500000): 'P',
-    (500001, float('inf')): 'Q'
-}
-
-def get_code_for_lot_size(lot_size):
-    for size_range, code in lot_size_to_code.items():
-        if size_range[0] <= lot_size <= size_range[1]:
-            return code
-    return 'Q'  # Default to largest code if lot size exceeds all ranges
-
-def get_sample_size(lot_size, aql):
-    code = get_code_for_lot_size(lot_size)
-    if code in iso_sampling_table:
-        if code in ['M', 'N', 'P', 'Q']:  # These codes aren't in our simplified table
-            code = 'L'  # Use the largest code we have
-        if aql in iso_sampling_table[code]:
-            return iso_sampling_table[code][aql]
-    return 200  # Default sample size if not found
-
-def get_acceptance_number(aql):
-    return acceptance_criteria.get(aql, 0)
-
 # App title and description
 st.markdown("""
 <div class="header-box">
-    <h1>Ứng Dụng QA Kiểm Tra Lùi Theo ISO-AQL</h1>
-    <p>Công cụ hỗ trợ kiểm tra lùi khi phát hiện lỗi sản phẩm, theo tiêu chuẩn ISO 2859-1</p>
+    <h1>Ứng Dụng QA Kiểm Tra Lùi Theo Phân Tầng Rủi Ro</h1>
+    <p>Công cụ hỗ trợ kiểm tra lùi khi phát hiện lỗi sản phẩm, với phân bổ mẫu theo mức độ rủi ro</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -122,7 +62,7 @@ with st.sidebar:
         "Tốc độ sản xuất (đơn vị/giờ)",
         min_value=10,
         max_value=10000,
-        value=500,
+        value=924,
         step=10
     )
     
@@ -143,7 +83,7 @@ with st.sidebar:
         default_aql_index = 1  # 2.5%
     
     aql = st.selectbox(
-        "Mức AQL (%)",
+        "Mức AQL cơ sở (%)",
         options=aql_options,
         index=default_aql_index,
         format_func=lambda x: f"{x}%"
@@ -163,6 +103,118 @@ with st.sidebar:
         step=1,
         help="Chia 2h thành bao nhiêu khoảng thời gian để kiểm tra"
     )
+    
+    total_samples = st.number_input(
+        "Tổng số mẫu có thể kiểm tra",
+        min_value=50,
+        max_value=1000,
+        value=200,
+        step=10,
+        help="Tổng số mẫu tối đa có thể kiểm tra cho tất cả các khoảng thời gian"
+    )
+
+# Risk-based distribution model
+def calculate_risk_distribution(intervals, total_samples, defect_type):
+    """
+    Calculate risk-based sample distribution across intervals
+    """
+    # Calculate risk weights based on proximity to detection point
+    if defect_type == "Lỗi nghiêm trọng (Critical)":
+        # Exponential risk distribution for critical defects
+        weights = [math.exp(-0.8 * i) for i in range(intervals)]
+    elif defect_type == "Lỗi chính (Major)":
+        # Less steep exponential for major defects
+        weights = [math.exp(-0.6 * i) for i in range(intervals)]
+    else:  # Minor
+        # Closer to linear for minor defects
+        weights = [math.exp(-0.4 * i) for i in range(intervals)]
+    
+    # Normalize weights to sum to 1
+    total_weight = sum(weights)
+    normalized_weights = [w / total_weight for w in weights]
+    
+    # Calculate sample sizes based on weights
+    samples = [round(total_samples * w) for w in normalized_weights]
+    
+    # Ensure minimum sample size (5) for each interval
+    samples = [max(s, 5) for s in samples]
+    
+    # Adjust if the sum exceeds the total
+    while sum(samples) > total_samples:
+        # Find the interval with largest sample that's not at minimum
+        max_idx = samples.index(max([s for s in samples if s > 5]))
+        samples[max_idx] -= 1
+    
+    # Adjust if the sum is less than the total
+    remaining = total_samples - sum(samples)
+    if remaining > 0:
+        # Distribute remaining samples to earlier intervals
+        for i in range(min(remaining, intervals)):
+            samples[i] += 1
+    
+    return samples
+
+# Calculate AQL progression based on proximity to detection
+def calculate_aql_progression(base_aql, intervals, defect_type):
+    """
+    Calculate AQL progression for intervals, with stricter AQLs for closer intervals
+    """
+    aqls = []
+    
+    if defect_type == "Lỗi nghiêm trọng (Critical)":
+        # For critical defects, tighter AQL progression
+        multipliers = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+    elif defect_type == "Lỗi chính (Major)":
+        # For major defects, moderate AQL progression
+        multipliers = [1.0, 1.3, 1.6, 2.0, 2.3, 2.6, 3.0, 3.3]
+    else:
+        # For minor defects, more relaxed AQL progression
+        multipliers = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4]
+    
+    # Limit multipliers array to the number of intervals
+    multipliers = multipliers[:intervals]
+    
+    for m in multipliers:
+        # Calculate AQL for this interval
+        interval_aql = base_aql * m
+        
+        # Find closest standard AQL value
+        standard_aqls = [0.065, 0.1, 0.15, 0.25, 0.4, 0.65, 1.0, 1.5, 2.5, 4.0, 6.5]
+        closest_aql = min(standard_aqls, key=lambda x: abs(x - interval_aql))
+        
+        aqls.append(closest_aql)
+    
+    return aqls
+
+# Calculate acceptance numbers
+def get_acceptance_numbers(aqls):
+    """
+    Get acceptance numbers based on AQL values
+    """
+    # Simplified acceptance criteria table
+    ac_table = {
+        0.065: 0, 
+        0.1: 0, 
+        0.15: 0, 
+        0.25: 0, 
+        0.4: 0, 
+        0.65: 1, 
+        1.0: 2, 
+        1.5: 3, 
+        2.5: 5, 
+        4.0: 7, 
+        6.5: 10
+    }
+    
+    acceptance_numbers = []
+    for aql_val in aqls:
+        # For critical defects with low AQL, ensure zero acceptance
+        if aql_val <= 0.25:
+            acceptance_numbers.append(0)
+        else:
+            acceptance_numbers.append(ac_table.get(aql_val, 0))
+    
+    return acceptance_numbers
 
 # Calculate intervals and sample sizes
 total_minutes = 120  # 2 hours
@@ -170,28 +222,23 @@ interval_minutes = total_minutes / inspection_intervals
 products_per_interval = math.ceil(production_rate * (interval_minutes / 60))
 total_products = products_per_interval * inspection_intervals
 
+# Get sample distribution based on risk
+sample_distribution = calculate_risk_distribution(inspection_intervals, total_samples, defect_type)
+
+# Get AQL progression
+aql_progression = calculate_aql_progression(aql, inspection_intervals, defect_type)
+
+# Get acceptance numbers
+acceptance_numbers = get_acceptance_numbers(aql_progression)
+
 # Create intervals data
 intervals_data = []
 for i in range(inspection_intervals):
     start_time = i * interval_minutes
     end_time = (i + 1) * interval_minutes
     
-    # Get proper AQL for each interval based on proximity to defect detection
-    interval_aql = aql
-    if i > 0:  # For intervals further from detection point, slightly increase AQL
-        if defect_type == "Lỗi nghiêm trọng (Critical)":
-            interval_aql = min(aql * (1 + i * 0.2), 0.25)
-        elif defect_type == "Lỗi chính (Major)":
-            interval_aql = min(aql * (1 + i * 0.2), 1.5)
-        else:  # Minor
-            interval_aql = min(aql * (1 + i * 0.2), 6.5)
-    
-    # Find closest supported AQL
-    closest_aql = min(aql_options, key=lambda x: abs(x - interval_aql))
-    
-    # Get sample size
-    sample_size = get_sample_size(products_per_interval, closest_aql)
-    acceptance_number = get_acceptance_number(closest_aql)
+    # Get sample size for this interval
+    sample_size = sample_distribution[i]
     
     # Adjustments based on inspection level
     if inspection_level == "Tăng cường":
@@ -207,9 +254,9 @@ for i in range(inspection_intervals):
         "interval": f"{i+1}",
         "time_range": f"{int(start_time)}-{int(end_time)} phút",
         "products": products_per_interval,
-        "aql": f"{closest_aql}%",
+        "aql": f"{aql_progression[i]}%",
         "sample_size": sample_size,
-        "acceptance_number": acceptance_number,
+        "acceptance_number": acceptance_numbers[i],
         "inspection_percentage": f"{inspection_percentage}%"
     })
 
@@ -279,54 +326,76 @@ with col2:
         </div>
         """, unsafe_allow_html=True)
 
+# Visualization of sample distribution
+st.header("Phân Tích Trực Quan")
+
+# Prepare data for chart
+chart_data = {
+    'Khoảng thời gian': [d['time_range'] for d in intervals_data],
+    'Cỡ mẫu': [d['sample_size'] for d in intervals_data],
+    'AQL (%)': [float(d['aql'].replace('%', '')) for d in intervals_data]
+}
+
+chart_df = pd.DataFrame(chart_data)
+
+# Create two columns for the charts
+chart_col1, chart_col2 = st.columns(2)
+
+with chart_col1:
+    st.subheader("Phân Bổ Cỡ Mẫu Theo Khoảng Thời Gian")
+    st.bar_chart(chart_df.set_index('Khoảng thời gian')['Cỡ mẫu'])
+    st.caption("Phân bổ theo mức độ rủi ro: tập trung nhiều mẫu hơn vào khoảng thời gian gần điểm phát hiện lỗi")
+
+with chart_col2:
+    st.subheader("Mức AQL Theo Khoảng Thời Gian")
+    st.line_chart(chart_df.set_index('Khoảng thời gian')['AQL (%)'])
+    st.caption("AQL tăng dần theo khoảng cách từ điểm phát hiện lỗi: càng xa càng ít nghiêm ngặt")
+
 # Additional information
 st.markdown("---")
-with st.expander("Thông Tin Thêm Về Phương Pháp ISO 2859-1"):
+with st.expander("Lý Do Phân Bổ Mẫu Theo Phân Tầng Rủi Ro"):
     st.markdown("""
-    ### Phương Pháp Lấy Mẫu ISO 2859-1
+    ### Tại Sao Sử Dụng Phân Tầng Rủi Ro?
     
-    ISO 2859-1 là tiêu chuẩn quốc tế cho quy trình lấy mẫu để kiểm tra theo thuộc tính. Tiêu chuẩn này cung cấp các kế hoạch lấy mẫu được thiết kế để đảm bảo rằng lô sản phẩm đáp ứng yêu cầu về Mức Chất Lượng Chấp Nhận (AQL).
+    Phương pháp phân tầng rủi ro phân bổ nhiều mẫu hơn cho các khoảng thời gian gần với điểm phát hiện lỗi. Điều này dựa trên các nguyên tắc thống kê và thực tế sản xuất:
     
-    #### Các Khái Niệm Chính:
+    1. **Xác suất lỗi không đồng đều theo thời gian**: Lỗi trong sản xuất thường xuất hiện theo xu hướng, không phải ngẫu nhiên đều đặn.
     
-    1. **AQL (Acceptable Quality Level)**: Mức chất lượng chấp nhận được, biểu thị bằng tỷ lệ phần trăm hoặc số lỗi trên 100 đơn vị.
+    2. **Hiệu quả nguồn lực**: Tập trung nguồn lực vào các khoảng thời gian có rủi ro cao nhất.
     
-    2. **Mức Kiểm Tra**: Xác định kích thước mẫu tương đối so với kích thước lô.
-       - Mức I: Kiểm tra giảm (cỡ mẫu nhỏ hơn)
-       - Mức II: Mức tiêu chuẩn (thông thường sử dụng)
-       - Mức III: Kiểm tra tăng cường (cỡ mẫu lớn hơn)
+    3. **Tối ưu hóa phát hiện lỗi**: Tăng khả năng phát hiện lỗi bằng cách kiểm tra kỹ lưỡng hơn ở khu vực có xác suất lỗi cao.
     
-    3. **Kích Thước Mẫu**: Được xác định dựa trên kích thước lô và mức kiểm tra.
+    4. **Tính lũy tích của độ tin cậy**: Nếu các khoảng thời gian gần hơn không có lỗi, khả năng cao là các khoảng xa hơn cũng sẽ không có lỗi.
     
-    4. **Số Chấp Nhận (Ac)**: Số lỗi tối đa cho phép trong mẫu.
+    ### Công Thức Phân Bổ
     
-    5. **Số Từ Chối (Re)**: Số lỗi tối thiểu dẫn đến việc từ chối lô.
+    Chúng tôi sử dụng phân bổ hàm mũ để tính trọng số cho mỗi khoảng thời gian:
     
-    #### Lợi Ích Của Phương Pháp:
+    - **Lỗi nghiêm trọng**: `w = exp(-0.8 * i)` → Giảm nhanh (tập trung mạnh vào khoảng gần nhất)
+    - **Lỗi chính**: `w = exp(-0.6 * i)` → Giảm vừa phải
+    - **Lỗi phụ**: `w = exp(-0.4 * i)` → Giảm chậm hơn (phân bổ đều hơn)
     
-    - Tiết kiệm chi phí kiểm tra
-    - Dựa trên nền tảng thống kê vững chắc
-    - Được công nhận rộng rãi trong ngành công nghiệp
-    - Cho phép điều chỉnh mức độ kiểm tra dựa trên lịch sử chất lượng
+    Trong đó `i` là chỉ số khoảng thời gian (0 = gần nhất, 1 = thứ hai, v.v.)
     
-    #### Quy Trình Kiểm Tra Tuần Tự:
+    ### AQL Theo Khoảng Thời Gian
     
-    Quy trình kiểm tra tuần tự được đề xuất trong ứng dụng này là một cải tiến của phương pháp ISO 2859-1 truyền thống:
+    AQL cũng được điều chỉnh theo khoảng cách từ điểm phát hiện lỗi:
     
-    1. Bắt đầu với khoảng thời gian gần nhất với thời điểm phát hiện lỗi
-    2. Áp dụng tiêu chí chấp nhận/từ chối cho từng khoảng
-    3. Chỉ tiến hành kiểm tra các khoảng tiếp theo nếu cần thiết
-    4. Giải phóng các lô đạt yêu cầu để tối ưu hóa quy trình
+    - Khoảng gần nhất: AQL thấp nhất (nghiêm ngặt nhất)
+    - Khoảng xa dần: AQL tăng dần (ít nghiêm ngặt hơn)
+    
+    Điều này phản ánh mức độ rủi ro giảm dần theo khoảng cách.
     """)
-
-st.markdown("---")
-st.caption("Ứng dụng QA Kiểm Tra Lùi Theo ISO-AQL | Dựa trên tiêu chuẩn ISO 2859-1")
 
 # Add download button for the inspection plan
 csv = df.to_csv(index=False).encode('utf-8')
 st.download_button(
     label="Tải xuống kế hoạch kiểm tra (CSV)",
     data=csv,
-    file_name="ke_hoach_kiem_tra.csv",
+    file_name="ke_hoach_kiem_tra_rui_ro.csv",
     mime="text/csv",
 )
+
+st.markdown("---")
+st.caption("Ứng dụng QA Kiểm Tra Lùi Theo Phân Tầng Rủi Ro")
+st.caption("Tối ưu nguồn lực QA trong khi vẫn đảm bảo chất lượng sản phẩm")
