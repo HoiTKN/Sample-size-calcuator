@@ -163,7 +163,6 @@ with st.expander("Thông tin thêm về phương pháp lấy mẫu"):
 # Add footer
 st.caption("Công thức: n = ln(1-CL) / ln(1-AQL)")
 st.caption("Dựa trên phương pháp lấy mẫu chấp nhận không lỗi")
-st.caption("Liên hệ QA Manager để biết thêm thông tin")
 
 # Add download example data button
 if st.button("Tải xuống thông tin phương pháp lấy mẫu"):
