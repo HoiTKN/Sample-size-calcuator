@@ -1,401 +1,354 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from scipy import stats
 import math
 
-# Set page config
+# Page config
 st.set_page_config(
-    page_title="Ứng Dụng QA Kiểm Tra Lùi Theo Phân Tầng Rủi Ro",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="Công Cụ Tính Lấy Mẫu Kiểm Lùi - QA Tool",
+    page_icon="📊",
+    layout="wide"
 )
 
-# Add custom CSS
+# Title and description
+st.title("🔍 Công Cụ Tính Toán Lấy Mẫu Kiểm Lùi")
 st.markdown("""
-<style>
-.main {
-    padding: 2rem;
-}
-.result-box {
-    padding: 1rem;
-    border-radius: 0.5rem;
-    margin-top: 1rem;
-}
-.green-box {
-    background-color: #d5f5e3;
-}
-.yellow-box {
-    background-color: #fdebd0;
-}
-.red-box {
-    background-color: #f5b7b1;
-}
-.time-interval {
-    padding: 1rem;
-    margin-bottom: 1rem;
-    border-radius: 0.5rem;
-    border: 1px solid #ddd;
-}
-.header-box {
-    background-color: #f8f9fa;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    margin-bottom: 1rem;
-    border-left: 5px solid #4e73df;
-}
-</style>
-""", unsafe_allow_html=True)
+**Mục đích**: Xác định số lượng mẫu cần kiểm tra liên tục không phát hiện lỗi để release lô hàng đã sản xuất trước đó.
 
-# App title and description
-st.markdown("""
-<div class="header-box">
-    <h1>Ứng Dụng QA Kiểm Tra Lùi Theo Phân Tầng Rủi Ro</h1>
-    <p>Công cụ hỗ trợ kiểm tra lùi khi phát hiện lỗi sản phẩm, với phân bổ mẫu theo mức độ rủi ro</p>
-</div>
-""", unsafe_allow_html=True)
+Công cụ này dựa trên:
+- ISO 2859-1:2020 (Acceptance sampling)
+- Lý thuyết thống kê Binomial và Hypergeometric
+- Nguyên tắc OC Curve (Operating Characteristic)
+""")
 
-# Sidebar inputs
-with st.sidebar:
-    st.header("Thông Số Đầu Vào")
-    
-    production_rate = st.number_input(
-        "Tốc độ sản xuất (đơn vị/giờ)",
-        min_value=10,
-        max_value=10000,
-        value=924,
-        step=10
-    )
-    
-    defect_type = st.selectbox(
-        "Phân loại lỗi",
-        options=["Lỗi nghiêm trọng (Critical)", "Lỗi chính (Major)", "Lỗi phụ (Minor)"]
-    )
-    
-    # Set AQL based on defect type
-    if defect_type == "Lỗi nghiêm trọng (Critical)":
-        aql_options = [0.065, 0.1, 0.15, 0.25]
-        default_aql_index = 1  # 0.1%
-    elif defect_type == "Lỗi chính (Major)":
-        aql_options = [0.4, 0.65, 1.0, 1.5]
-        default_aql_index = 2  # 1.0%
-    else:  # Minor
-        aql_options = [1.5, 2.5, 4.0, 6.5]
-        default_aql_index = 1  # 2.5%
-    
-    aql = st.selectbox(
-        "Mức AQL cơ sở (%)",
-        options=aql_options,
-        index=default_aql_index,
-        format_func=lambda x: f"{x}%"
-    )
-    
-    inspection_level = st.selectbox(
-        "Mức độ kiểm tra",
-        options=["Tiêu chuẩn", "Tăng cường", "Giảm"],
-        index=0
-    )
-    
-    inspection_intervals = st.number_input(
-        "Số lượng khoảng thời gian kiểm tra",
-        min_value=2,
-        max_value=8,
-        value=4,
-        step=1,
-        help="Chia 2h thành bao nhiêu khoảng thời gian để kiểm tra"
-    )
-    
-    total_samples = st.number_input(
-        "Tổng số mẫu có thể kiểm tra",
-        min_value=50,
-        max_value=1000,
-        value=200,
-        step=10,
-        help="Tổng số mẫu tối đa có thể kiểm tra cho tất cả các khoảng thời gian"
-    )
+# Sidebar for inputs
+st.sidebar.header("📝 Thông Số Đầu Vào")
 
-# Risk-based distribution model
-def calculate_risk_distribution(intervals, total_samples, defect_type):
-    """
-    Calculate risk-based sample distribution across intervals
-    """
-    # Calculate risk weights based on proximity to detection point
-    if defect_type == "Lỗi nghiêm trọng (Critical)":
-        # Exponential risk distribution for critical defects
-        weights = [math.exp(-0.8 * i) for i in range(intervals)]
-    elif defect_type == "Lỗi chính (Major)":
-        # Less steep exponential for major defects
-        weights = [math.exp(-0.6 * i) for i in range(intervals)]
-    else:  # Minor
-        # Closer to linear for minor defects
-        weights = [math.exp(-0.4 * i) for i in range(intervals)]
-    
-    # Normalize weights to sum to 1
-    total_weight = sum(weights)
-    normalized_weights = [w / total_weight for w in weights]
-    
-    # Calculate sample sizes based on weights
-    samples = [round(total_samples * w) for w in normalized_weights]
-    
-    # Ensure minimum sample size (5) for each interval
-    samples = [max(s, 5) for s in samples]
-    
-    # Adjust if the sum exceeds the total
-    while sum(samples) > total_samples:
-        # Find the interval with largest sample that's not at minimum
-        max_idx = samples.index(max([s for s in samples if s > 5]))
-        samples[max_idx] -= 1
-    
-    # Adjust if the sum is less than the total
-    remaining = total_samples - sum(samples)
-    if remaining > 0:
-        # Distribute remaining samples to earlier intervals
-        for i in range(min(remaining, intervals)):
-            samples[i] += 1
-    
-    return samples
+# Input parameters
+actual_defect_rate = st.sidebar.number_input(
+    "Tỷ lệ lỗi thực tế phát hiện (%)",
+    min_value=0.0,
+    max_value=100.0,
+    value=3.33,
+    step=0.01,
+    help="Ví dụ: Kiểm 30 gói, phát hiện 1 lỗi = 3.33%"
+)
 
-# Calculate AQL progression based on proximity to detection
-def calculate_aql_progression(base_aql, intervals, defect_type):
-    """
-    Calculate AQL progression for intervals, with stricter AQLs for closer intervals
-    """
-    aqls = []
-    
-    if defect_type == "Lỗi nghiêm trọng (Critical)":
-        # For critical defects, tighter AQL progression
-        multipliers = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
-    elif defect_type == "Lỗi chính (Major)":
-        # For major defects, moderate AQL progression
-        multipliers = [1.0, 1.3, 1.6, 2.0, 2.3, 2.6, 3.0, 3.3]
-    else:
-        # For minor defects, more relaxed AQL progression
-        multipliers = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4]
-    
-    # Limit multipliers array to the number of intervals
-    multipliers = multipliers[:intervals]
-    
-    for m in multipliers:
-        # Calculate AQL for this interval
-        interval_aql = base_aql * m
-        
-        # Find closest standard AQL value
-        standard_aqls = [0.065, 0.1, 0.15, 0.25, 0.4, 0.65, 1.0, 1.5, 2.5, 4.0, 6.5]
-        closest_aql = min(standard_aqls, key=lambda x: abs(x - interval_aql))
-        
-        aqls.append(closest_aql)
-    
-    return aqls
+aql_level = st.sidebar.number_input(
+    "AQL - Mức chất lượng chấp nhận (%)",
+    min_value=0.0,
+    max_value=100.0,
+    value=1.0,
+    step=0.1,
+    help="Mức AQL công ty đang áp dụng cho loại lỗi này"
+)
 
-# Calculate acceptance numbers
-def get_acceptance_numbers(aqls):
-    """
-    Get acceptance numbers based on AQL values
-    """
-    # Simplified acceptance criteria table
-    ac_table = {
-        0.065: 0, 
-        0.1: 0, 
-        0.15: 0, 
-        0.25: 0, 
-        0.4: 0, 
-        0.65: 1, 
-        1.0: 2, 
-        1.5: 3, 
-        2.5: 5, 
-        4.0: 7, 
-        6.5: 10
-    }
+confidence_level = st.sidebar.selectbox(
+    "Mức độ tin cậy (%)",
+    options=[90, 95, 99],
+    index=1,
+    help="95% là mức khuyến nghị cho FMCG"
+)
+
+lot_size = st.sidebar.number_input(
+    "Kích thước lô sản xuất",
+    min_value=100,
+    value=10000,
+    step=100,
+    help="Số lượng sản phẩm trong mỗi lô"
+)
+
+# Advanced settings
+with st.sidebar.expander("⚙️ Cài Đặt Nâng Cao"):
+    risk_assessment_method = st.selectbox(
+        "Phương pháp đánh giá rủi ro",
+        ["Tự động (dựa trên tỷ lệ lỗi)", "Thủ công", "FMEA Score"]
+    )
     
-    acceptance_numbers = []
-    for aql_val in aqls:
-        # For critical defects with low AQL, ensure zero acceptance
-        if aql_val <= 0.25:
-            acceptance_numbers.append(0)
+    if risk_assessment_method == "Thủ công":
+        manual_multiplier = st.slider("Hệ số nhân thủ công", 1.0, 10.0, 3.0, 0.5)
+    elif risk_assessment_method == "FMEA Score":
+        severity = st.slider("Mức độ nghiêm trọng (1-10)", 1, 10, 5)
+        occurrence = st.slider("Tần suất xảy ra (1-10)", 1, 10, 5)
+        detection = st.slider("Khả năng phát hiện (1-10)", 1, 10, 5)
+
+# Calculations
+def calculate_sample_size(defect_rate, aql, confidence, lot_size):
+    """Calculate backward sampling parameters"""
+    
+    # Convert percentages to decimals
+    p_defect = defect_rate / 100
+    p_aql = aql / 100
+    conf = confidence / 100
+    
+    # Zero-defect sample size calculation
+    # n = ln(1-CL) / ln(1-p)
+    n_zero_defect = math.ceil(-math.log(1 - conf) / math.log(1 - p_aql))
+    
+    # Determine risk level and multiplier
+    ratio = defect_rate / aql if aql > 0 else float('inf')
+    
+    if risk_assessment_method == "Tự động (dựa trên tỷ lệ lỗi)":
+        if ratio <= 1:
+            risk_level = "Thấp"
+            multiplier = 2
+            recommended_batches = 2
+            color = "green"
+        elif ratio <= 3:
+            risk_level = "Trung bình"
+            multiplier = 3
+            recommended_batches = 3
+            color = "yellow"
+        elif ratio <= 5:
+            risk_level = "Cao"
+            multiplier = 5
+            recommended_batches = 5
+            color = "orange"
         else:
-            acceptance_numbers.append(ac_table.get(aql_val, 0))
+            risk_level = "Rất cao"
+            multiplier = 10
+            recommended_batches = 10
+            color = "red"
+    elif risk_assessment_method == "Thủ công":
+        multiplier = manual_multiplier
+        risk_level = "Tùy chỉnh"
+        recommended_batches = int(multiplier)
+        color = "blue"
+    else:  # FMEA
+        rpn = severity * occurrence * detection
+        if rpn <= 50:
+            risk_level = f"RPN={rpn} (Thấp)"
+            multiplier = 2
+            recommended_batches = 2
+            color = "green"
+        elif rpn <= 100:
+            risk_level = f"RPN={rpn} (Trung bình)"
+            multiplier = 3
+            recommended_batches = 3
+            color = "yellow"
+        elif rpn <= 200:
+            risk_level = f"RPN={rpn} (Cao)"
+            multiplier = 5
+            recommended_batches = 5
+            color = "orange"
+        else:
+            risk_level = f"RPN={rpn} (Rất cao)"
+            multiplier = 10
+            recommended_batches = 10
+            color = "red"
     
-    return acceptance_numbers
-
-# Calculate intervals and sample sizes
-total_minutes = 120  # 2 hours
-interval_minutes = total_minutes / inspection_intervals
-products_per_interval = math.ceil(production_rate * (interval_minutes / 60))
-total_products = products_per_interval * inspection_intervals
-
-# Get sample distribution based on risk
-sample_distribution = calculate_risk_distribution(inspection_intervals, total_samples, defect_type)
-
-# Get AQL progression
-aql_progression = calculate_aql_progression(aql, inspection_intervals, defect_type)
-
-# Get acceptance numbers
-acceptance_numbers = get_acceptance_numbers(aql_progression)
-
-# Create intervals data
-intervals_data = []
-for i in range(inspection_intervals):
-    start_time = i * interval_minutes
-    end_time = (i + 1) * interval_minutes
+    # Calculate backward sample size
+    backward_sample_size = math.ceil(n_zero_defect * multiplier)
     
-    # Get sample size for this interval
-    sample_size = sample_distribution[i]
+    # Ensure sample size doesn't exceed lot size
+    if backward_sample_size > lot_size:
+        backward_sample_size = lot_size
     
-    # Adjustments based on inspection level
-    if inspection_level == "Tăng cường":
-        sample_size = math.ceil(sample_size * 1.2)
-    elif inspection_level == "Giảm":
-        sample_size = math.floor(sample_size * 0.8)
-        sample_size = max(sample_size, 5)  # Ensure minimum sample size
+    # Calculate acceptance probability
+    acceptance_probability = (1 - p_aql) ** backward_sample_size * 100
     
-    # Calculate inspection percentage
-    inspection_percentage = round((sample_size / products_per_interval) * 100, 1)
+    # Calculate beta risk (consumer's risk)
+    beta_risk = stats.binom.cdf(0, backward_sample_size, p_defect) * 100
     
-    intervals_data.append({
-        "interval": f"{i+1}",
-        "time_range": f"{int(start_time)}-{int(end_time)} phút",
-        "products": products_per_interval,
-        "aql": f"{aql_progression[i]}%",
-        "sample_size": sample_size,
-        "acceptance_number": acceptance_numbers[i],
-        "inspection_percentage": f"{inspection_percentage}%"
-    })
+    # Statistical justification for multiplier
+    # Based on reducing confidence interval width
+    ci_reduction = (1 - 1/math.sqrt(multiplier)) * 100
+    
+    return {
+        'base_sample_size': n_zero_defect,
+        'multiplier': multiplier,
+        'backward_sample_size': backward_sample_size,
+        'risk_level': risk_level,
+        'recommended_batches': recommended_batches,
+        'acceptance_probability': acceptance_probability,
+        'beta_risk': beta_risk,
+        'ratio': ratio,
+        'color': color,
+        'ci_reduction': ci_reduction
+    }
 
-# Main content
-col1, col2 = st.columns([3, 2])
+# Calculate results
+results = calculate_sample_size(actual_defect_rate, aql_level, confidence_level, lot_size)
+
+# Main content area
+col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.header("Kế Hoạch Kiểm Tra Lùi")
+    st.header("📊 Kết Quả Tính Toán")
     
-    # Display intervals table
-    df = pd.DataFrame(intervals_data)
-    st.dataframe(
-        df,
-        column_config={
-            "interval": "Khoảng",
-            "time_range": "Khoảng thời gian",
-            "products": "Sản phẩm",
-            "aql": "AQL",
-            "sample_size": "Cỡ mẫu",
-            "acceptance_number": "Số chấp nhận",
-            "inspection_percentage": "% Kiểm tra"
-        },
-        hide_index=True
+    # Key metrics
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+    
+    with metric_col1:
+        st.metric(
+            "Mức Rủi Ro",
+            results['risk_level'],
+            delta=f"Tỷ lệ: {results['ratio']:.1f}x AQL"
+        )
+    
+    with metric_col2:
+        st.metric(
+            "Hệ Số Nhân",
+            f"{results['multiplier']}x",
+            delta=f"CI giảm {results['ci_reduction']:.0f}%"
+        )
+    
+    with metric_col3:
+        st.metric(
+            "Số Mẫu/Lô",
+            f"{results['backward_sample_size']}",
+            delta=f"Cơ bản: {results['base_sample_size']}"
+        )
+    
+    with metric_col4:
+        st.metric(
+            "Số Lô Yêu Cầu",
+            f"{results['recommended_batches']} lô",
+            delta=f"Tổng: {results['backward_sample_size'] * results['recommended_batches']} mẫu"
+        )
+    
+    # OC Curve
+    st.subheader("📈 Đường Cong OC (Operating Characteristic)")
+    
+    # Generate OC curve data
+    p_values = np.linspace(0, min(0.1, actual_defect_rate/100 * 2), 100)
+    pa_values = [(1 - p) ** results['backward_sample_size'] for p in p_values]
+    
+    fig_oc = go.Figure()
+    fig_oc.add_trace(go.Scatter(
+        x=p_values * 100,
+        y=[pa * 100 for pa in pa_values],
+        mode='lines',
+        name='OC Curve',
+        line=dict(color='blue', width=2)
+    ))
+    
+    # Add markers for AQL and actual defect rate
+    fig_oc.add_trace(go.Scatter(
+        x=[aql_level],
+        y=[results['acceptance_probability']],
+        mode='markers',
+        name='AQL',
+        marker=dict(color='green', size=10)
+    ))
+    
+    fig_oc.add_trace(go.Scatter(
+        x=[actual_defect_rate],
+        y=[results['beta_risk']],
+        mode='markers',
+        name='Tỷ lệ lỗi thực tế',
+        marker=dict(color='red', size=10)
+    ))
+    
+    fig_oc.update_layout(
+        title="Xác suất chấp nhận lô theo tỷ lệ lỗi thực",
+        xaxis_title="Tỷ lệ lỗi thực (%)",
+        yaxis_title="Xác suất chấp nhận (%)",
+        hovermode='x unified'
     )
     
-    # Calculate totals
-    total_sample_size = sum(interval["sample_size"] for interval in intervals_data)
-    overall_inspection_percentage = round((total_sample_size / total_products) * 100, 1)
-    
-    st.markdown(f"""
-    <div class="result-box green-box">
-        <h4>Tổng Quan:</h4>
-        <p>- Tổng số sản phẩm (2 giờ): <b>{total_products}</b> đơn vị</p>
-        <p>- Tổng số mẫu cần kiểm tra: <b>{total_sample_size}</b> đơn vị</p>
-        <p>- Tỷ lệ kiểm tra: <b>{overall_inspection_percentage}%</b></p>
-        <p>- Giảm khối lượng kiểm tra: <b>{100 - overall_inspection_percentage}%</b> so với kiểm tra 100%</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.plotly_chart(fig_oc, use_container_width=True)
 
 with col2:
-    st.header("Quy Trình Kiểm Tra Tuần Tự")
+    st.header("📋 Hướng Dẫn Thực Hiện")
     
-    st.markdown("""
-    <div class="result-box yellow-box">
-        <h4>Hướng Dẫn Thực Hiện:</h4>
-        <ol>
-            <li>Bắt đầu kiểm tra khoảng thời gian gần nhất với thời điểm phát hiện lỗi</li>
-            <li>Kiểm tra đúng số lượng mẫu theo bảng</li>
-            <li>Ghi lại số lỗi phát hiện được</li>
-            <li>So sánh với số chấp nhận và quyết định lô</li>
-            <li>Tiếp tục kiểm tra các khoảng thời gian tiếp theo</li>
-        </ol>
-    </div>
-    """, unsafe_allow_html=True)
+    # Create action plan
+    st.info(f"""
+    **Kế hoạch kiểm tra:**
+    1. Kiểm tra **{results['backward_sample_size']} mẫu** từ mỗi lô
+    2. Thực hiện trên **{results['recommended_batches']} lô liên tiếp**
+    3. Tổng cộng: **{results['backward_sample_size'] * results['recommended_batches']} mẫu**
+    4. Điều kiện: **0 lỗi** trong toàn bộ mẫu
+    """)
     
-    # Acceptance criteria explanation
-    st.subheader("Tiêu Chí Chấp Nhận/Từ Chối")
-    
-    for interval in intervals_data:
-        st.markdown(f"""
-        <div class="time-interval">
-            <h5>Khoảng {interval['interval']} ({interval['time_range']})</h5>
-            <p>- Cỡ mẫu: {interval['sample_size']} đơn vị</p>
-            <p>- Số chấp nhận (Ac): {interval['acceptance_number']}</p>
-            <p>- Số từ chối (Re): {interval['acceptance_number'] + 1}</p>
-            <p>- <b>Quyết định:</b> Nếu số lỗi ≤ {interval['acceptance_number']}, chấp nhận lô và giải phóng. Nếu số lỗi ≥ {interval['acceptance_number'] + 1}, từ chối lô và giữ lại.</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # Risk assessment
+    if results['color'] == 'green':
+        st.success("✅ Rủi ro thấp - Có thể áp dụng kiểm tra thông thường")
+    elif results['color'] == 'yellow':
+        st.warning("⚠️ Rủi ro trung bình - Cần giám sát chặt chẽ")
+    elif results['color'] == 'orange':
+        st.warning("⚠️ Rủi ro cao - Yêu cầu hành động khắc phục")
+    else:
+        st.error("🚨 Rủi ro rất cao - Cần dừng sản xuất và điều tra")
 
-# Visualization of sample distribution
-st.header("Phân Tích Trực Quan")
-
-# Prepare data for chart
-chart_data = {
-    'Khoảng thời gian': [d['time_range'] for d in intervals_data],
-    'Cỡ mẫu': [d['sample_size'] for d in intervals_data],
-    'AQL (%)': [float(d['aql'].replace('%', '')) for d in intervals_data]
-}
-
-chart_df = pd.DataFrame(chart_data)
-
-# Create two columns for the charts
-chart_col1, chart_col2 = st.columns(2)
-
-with chart_col1:
-    st.subheader("Phân Bổ Cỡ Mẫu Theo Khoảng Thời Gian")
-    st.bar_chart(chart_df.set_index('Khoảng thời gian')['Cỡ mẫu'])
-    st.caption("Phân bổ theo mức độ rủi ro: tập trung nhiều mẫu hơn vào khoảng thời gian gần điểm phát hiện lỗi")
-
-with chart_col2:
-    st.subheader("Mức AQL Theo Khoảng Thời Gian")
-    st.line_chart(chart_df.set_index('Khoảng thời gian')['AQL (%)'])
-    st.caption("AQL tăng dần theo khoảng cách từ điểm phát hiện lỗi: càng xa càng ít nghiêm ngặt")
-
-# Additional information
-st.markdown("---")
-with st.expander("Lý Do Phân Bổ Mẫu Theo Phân Tầng Rủi Ro"):
-    st.markdown("""
-    ### Tại Sao Sử Dụng Phân Tầng Rủi Ro?
+# Statistical justification section
+with st.expander("🔬 Cơ Sở Khoa Học Cho Hệ Số Nhân"):
+    st.markdown(f"""
+    ### Lý do thống kê cho hệ số nhân {results['multiplier']}x:
     
-    Phương pháp phân tầng rủi ro phân bổ nhiều mẫu hơn cho các khoảng thời gian gần với điểm phát hiện lỗi. Điều này dựa trên các nguyên tắc thống kê và thực tế sản xuất:
+    1. **Giảm độ rộng khoảng tin cậy**: 
+       - Với cỡ mẫu n → {results['multiplier']}n
+       - Độ rộng CI giảm: {results['ci_reduction']:.1f}%
+       - Công thức: CI width ∝ 1/√n
     
-    1. **Xác suất lỗi không đồng đều theo thời gian**: Lỗi trong sản xuất thường xuất hiện theo xu hướng, không phải ngẫu nhiên đều đặn.
+    2. **Tăng Power của test (1-β)**:
+       - Power = khả năng phát hiện lỗi thực sự
+       - Với n={results['base_sample_size']}: Power ≈ {(1-stats.binom.cdf(0, results['base_sample_size'], actual_defect_rate/100))*100:.1f}%
+       - Với n={results['backward_sample_size']}: Power ≈ {(1-results['beta_risk']/100)*100:.1f}%
     
-    2. **Hiệu quả nguồn lực**: Tập trung nguồn lực vào các khoảng thời gian có rủi ro cao nhất.
+    3. **Nguyên tắc Switching Rules (ISO 2859)**:
+       - Normal → Tightened: khi 2/5 lô bị reject
+       - Tightened sampling = 1.5-2x normal sampling
+       - Backward sampling cần nghiêm ngặt hơn → {results['multiplier']}x
     
-    3. **Tối ưu hóa phát hiện lỗi**: Tăng khả năng phát hiện lỗi bằng cách kiểm tra kỹ lưỡng hơn ở khu vực có xác suất lỗi cao.
-    
-    4. **Tính lũy tích của độ tin cậy**: Nếu các khoảng thời gian gần hơn không có lỗi, khả năng cao là các khoảng xa hơn cũng sẽ không có lỗi.
-    
-    ### Công Thức Phân Bổ
-    
-    Chúng tôi sử dụng phân bổ hàm mũ để tính trọng số cho mỗi khoảng thời gian:
-    
-    - **Lỗi nghiêm trọng**: `w = exp(-0.8 * i)` → Giảm nhanh (tập trung mạnh vào khoảng gần nhất)
-    - **Lỗi chính**: `w = exp(-0.6 * i)` → Giảm vừa phải
-    - **Lỗi phụ**: `w = exp(-0.4 * i)` → Giảm chậm hơn (phân bổ đều hơn)
-    
-    Trong đó `i` là chỉ số khoảng thời gian (0 = gần nhất, 1 = thứ hai, v.v.)
-    
-    ### AQL Theo Khoảng Thời Gian
-    
-    AQL cũng được điều chỉnh theo khoảng cách từ điểm phát hiện lỗi:
-    
-    - Khoảng gần nhất: AQL thấp nhất (nghiêm ngặt nhất)
-    - Khoảng xa dần: AQL tăng dần (ít nghiêm ngặt hơn)
-    
-    Điều này phản ánh mức độ rủi ro giảm dần theo khoảng cách.
+    4. **Cân bằng Risk**:
+       - Producer's risk (α): {100-results['acceptance_probability']:.1f}% tại AQL
+       - Consumer's risk (β): {results['beta_risk']:.1f}% tại tỷ lệ lỗi thực tế
     """)
 
-# Add download button for the inspection plan
-csv = df.to_csv(index=False).encode('utf-8')
+# Recommendations
+st.header("💡 Khuyến Nghị Cải Tiến")
+
+col_rec1, col_rec2 = st.columns(2)
+
+with col_rec1:
+    st.subheader("Hành động ngay lập tức:")
+    st.markdown("""
+    - 🔍 Phân tích 5 Why cho nguyên nhân gốc
+    - 🛠️ Kiểm tra và hiệu chuẩn thiết bị
+    - 👥 Đào tạo lại nhân viên vận hành
+    - 📊 Tăng tần suất kiểm tra in-process
+    """)
+
+with col_rec2:
+    st.subheader("Cải tiến dài hạn:")
+    st.markdown("""
+    - 📈 Triển khai SPC cho critical parameters
+    - 🎯 Đánh giá lại tiêu chuẩn AQL
+    - 🔄 Cải tiến quy trình (DMAIC/Kaizen)
+    - 📱 Số hóa hệ thống ghi nhận dữ liệu
+    """)
+
+# Export results
+st.header("📥 Xuất Báo Cáo")
+
+report_data = {
+    'Thông số': ['Tỷ lệ lỗi thực tế (%)', 'AQL (%)', 'Độ tin cậy (%)', 
+                 'Mức rủi ro', 'Hệ số nhân', 'Số mẫu/lô', 
+                 'Số lô yêu cầu', 'Tổng mẫu cần kiểm'],
+    'Giá trị': [actual_defect_rate, aql_level, confidence_level,
+                results['risk_level'], results['multiplier'], 
+                results['backward_sample_size'], results['recommended_batches'],
+                results['backward_sample_size'] * results['recommended_batches']]
+}
+
+df_report = pd.DataFrame(report_data)
+
+csv = df_report.to_csv(index=False, encoding='utf-8-sig')
 st.download_button(
-    label="Tải xuống kế hoạch kiểm tra (CSV)",
+    label="📊 Tải xuống báo cáo CSV",
     data=csv,
-    file_name="ke_hoach_kiem_tra_rui_ro.csv",
-    mime="text/csv",
+    file_name=f"backward_sampling_report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+    mime="text/csv"
 )
 
+# Footer
 st.markdown("---")
-st.caption("Ứng dụng QA Kiểm Tra Lùi Theo Phân Tầng Rủi Ro")
-st.caption("Tối ưu nguồn lực QA trong khi vẫn đảm bảo chất lượng sản phẩm")
+st.markdown("""
+<div style='text-align: center'>
+    <p>Phát triển bởi QA Team | Dựa trên ISO 2859-1:2020 & Statistical Theory</p>
+</div>
+""", unsafe_allow_html=True)
