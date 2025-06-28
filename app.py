@@ -22,28 +22,52 @@ Công cụ này dựa trên:
 - ISO 2859-1:2020 (Acceptance sampling)
 - Lý thuyết thống kê Binomial và Hypergeometric
 - Nguyên tắc OC Curve (Operating Characteristic)
+- Phân tích Pattern lỗi thực tế
 """)
 
 # Sidebar for inputs
 st.sidebar.header("📝 Thông Số Đầu Vào")
 
-# Input parameters
-actual_defect_rate = st.sidebar.number_input(
-    "Tỷ lệ lỗi thực tế phát hiện (%)",
-    min_value=0.0,
-    max_value=100.0,
-    value=3.33,
-    step=0.01,
-    help="Ví dụ: Kiểm 30 gói, phát hiện 1 lỗi = 3.33%"
+# Defect Pattern Analysis
+st.sidebar.subheader("🔍 Phân Tích Pattern Lỗi")
+defect_pattern = st.sidebar.selectbox(
+    "Pattern lỗi phát hiện",
+    ["Chọn pattern...", 
+     "A - Tập trung (1 thùng nhiều lỗi)", 
+     "B - Gián đoạn (vài thùng ít lỗi)",
+     "C - Rời rạc (nhiều thùng ít lỗi)"],
+    help="Pattern lỗi ảnh hưởng đến chiến lược kiểm lùi"
 )
+
+# Input parameters
+total_defects = st.sidebar.number_input(
+    "Tổng số lỗi phát hiện",
+    min_value=1,
+    value=5,
+    step=1,
+    help="Tổng số gói lỗi trong lần kiểm"
+)
+
+sample_size_checked = st.sidebar.number_input(
+    "Tổng số mẫu đã kiểm (gói)",
+    min_value=1,
+    value=150,
+    step=1,
+    help="Tổng số gói đã kiểm tra"
+)
+
+# Calculate actual defect rate
+actual_defect_rate = (total_defects / sample_size_checked) * 100
+
+st.sidebar.info(f"Tỷ lệ lỗi thực tế: {actual_defect_rate:.2f}%")
 
 aql_level = st.sidebar.number_input(
     "AQL - Mức chất lượng chấp nhận (%)",
     min_value=0.0,
     max_value=100.0,
-    value=1.0,
+    value=0.0,
     step=0.1,
-    help="Mức AQL công ty đang áp dụng cho loại lỗi này"
+    help="AQL cho lỗi rách thường là 0%"
 )
 
 confidence_level = st.sidebar.selectbox(
@@ -53,19 +77,40 @@ confidence_level = st.sidebar.selectbox(
     help="95% là mức khuyến nghị cho FMCG"
 )
 
-lot_size = st.sidebar.number_input(
-    "Kích thước lô sản xuất",
+# Production parameters
+st.sidebar.subheader("📦 Thông Số Sản Xuất")
+boxes_per_hour = st.sidebar.number_input(
+    "Số thùng sản xuất/giờ",
     min_value=100,
-    value=10000,
+    value=5000,
     step=100,
-    help="Số lượng sản phẩm trong mỗi lô"
+    help="Tốc độ sản xuất"
+)
+
+units_per_box = st.sidebar.number_input(
+    "Số gói/thùng",
+    min_value=1,
+    value=30,
+    step=1
+)
+
+hold_duration = st.sidebar.number_input(
+    "Thời gian hold (giờ)",
+    min_value=1.0,
+    value=2.0,
+    step=0.5,
+    help="Thường là 2h từ lần kiểm OK gần nhất"
 )
 
 # Advanced settings
+risk_assessment_method = "Pattern-based"
+manual_multiplier = 3.0
+severity = occurrence = detection = 5
+
 with st.sidebar.expander("⚙️ Cài Đặt Nâng Cao"):
     risk_assessment_method = st.selectbox(
         "Phương pháp đánh giá rủi ro",
-        ["Tự động (dựa trên tỷ lệ lỗi)", "Thủ công", "FMEA Score"]
+        ["Pattern-based", "Tự động (tỷ lệ lỗi)", "Thủ công", "FMEA Score"]
     )
     
     if risk_assessment_method == "Thủ công":
@@ -76,263 +121,403 @@ with st.sidebar.expander("⚙️ Cài Đặt Nâng Cao"):
         detection = st.slider("Khả năng phát hiện (1-10)", 1, 10, 5)
 
 # Calculations
-def calculate_sample_size(defect_rate, aql, confidence, lot_size):
-    """Calculate backward sampling parameters"""
+def calculate_backward_sampling(defect_rate, aql, confidence, pattern, risk_method):
+    """Calculate backward sampling based on pattern analysis"""
     
     # Convert percentages to decimals
     p_defect = defect_rate / 100
-    p_aql = aql / 100
+    p_aql = (aql / 100) if aql > 0 else 0.001  # Avoid log(0)
     conf = confidence / 100
     
     # Zero-defect sample size calculation
-    # n = ln(1-CL) / ln(1-p)
     n_zero_defect = math.ceil(-math.log(1 - conf) / math.log(1 - p_aql))
     
-    # Determine risk level and multiplier
-    ratio = defect_rate / aql if aql > 0 else float('inf')
-    
-    if risk_assessment_method == "Tự động (dựa trên tỷ lệ lỗi)":
-        if ratio <= 1:
-            risk_level = "Thấp"
+    # Pattern-based approach
+    if risk_method == "Pattern-based" and pattern != "Chọn pattern...":
+        if "A -" in pattern:  # Clustered
+            boxes_to_check = 200
+            risk_level = "Tập trung - Rủi ro thấp"
             multiplier = 2
-            recommended_batches = 2
+            strategy = "Kiểm 4-8h ngược từ thời điểm lỗi"
             color = "green"
-        elif ratio <= 3:
-            risk_level = "Trung bình"
+        elif "B -" in pattern:  # Intermittent
+            boxes_to_check = 500
+            risk_level = "Gián đoạn - Rủi ro trung bình"
             multiplier = 3
-            recommended_batches = 3
+            strategy = "Kiểm 8-12h ngược, monitor trend"
             color = "yellow"
-        elif ratio <= 5:
-            risk_level = "Cao"
+        elif "C -" in pattern:  # Random
+            boxes_to_check = 1000
+            risk_level = "Rời rạc - Rủi ro cao (hệ thống)"
             multiplier = 5
-            recommended_batches = 5
-            color = "orange"
-        else:
-            risk_level = "Rất cao"
-            multiplier = 10
-            recommended_batches = 10
+            strategy = "Kiểm 12-24h ngược, root cause analysis"
             color = "red"
-    elif risk_assessment_method == "Thủ công":
-        multiplier = manual_multiplier
-        risk_level = "Tùy chỉnh"
-        recommended_batches = int(multiplier)
-        color = "blue"
-    else:  # FMEA
-        rpn = severity * occurrence * detection
-        if rpn <= 50:
-            risk_level = f"RPN={rpn} (Thấp)"
-            multiplier = 2
-            recommended_batches = 2
-            color = "green"
-        elif rpn <= 100:
-            risk_level = f"RPN={rpn} (Trung bình)"
+        else:
+            boxes_to_check = 500
+            risk_level = "Không xác định"
             multiplier = 3
-            recommended_batches = 3
-            color = "yellow"
-        elif rpn <= 200:
-            risk_level = f"RPN={rpn} (Cao)"
-            multiplier = 5
-            recommended_batches = 5
-            color = "orange"
-        else:
-            risk_level = f"RPN={rpn} (Rất cao)"
-            multiplier = 10
-            recommended_batches = 10
-            color = "red"
+            strategy = "Áp dụng mức trung bình"
+            color = "gray"
+    else:
+        # Fallback to ratio-based
+        ratio = defect_rate / aql if aql > 0 else float('inf')
+        
+        if risk_method == "Tự động (tỷ lệ lỗi)":
+            if ratio <= 1:
+                risk_level = "Thấp"
+                multiplier = 2
+                boxes_to_check = 200
+                color = "green"
+            elif ratio <= 3:
+                risk_level = "Trung bình"
+                multiplier = 3
+                boxes_to_check = 500
+                color = "yellow"
+            elif ratio <= 5:
+                risk_level = "Cao"
+                multiplier = 5
+                boxes_to_check = 800
+                color = "orange"
+            else:
+                risk_level = "Rất cao"
+                multiplier = 10
+                boxes_to_check = 1000
+                color = "red"
+        elif risk_method == "Thủ công":
+            multiplier = manual_multiplier
+            boxes_to_check = int(200 * multiplier / 2)
+            risk_level = "Tùy chỉnh"
+            color = "blue"
+        else:  # FMEA
+            rpn = severity * occurrence * detection
+            if rpn <= 50:
+                risk_level = f"RPN={rpn} (Thấp)"
+                multiplier = 2
+                boxes_to_check = 200
+                color = "green"
+            elif rpn <= 100:
+                risk_level = f"RPN={rpn} (Trung bình)"
+                multiplier = 3
+                boxes_to_check = 500
+                color = "yellow"
+            elif rpn <= 200:
+                risk_level = f"RPN={rpn} (Cao)"
+                multiplier = 5
+                boxes_to_check = 800
+                color = "orange"
+            else:
+                risk_level = f"RPN={rpn} (Rất cao)"
+                multiplier = 10
+                boxes_to_check = 1000
+                color = "red"
+        
+        strategy = f"Kiểm {boxes_to_check} thùng liên tục"
     
-    # Calculate backward sample size
-    backward_sample_size = math.ceil(n_zero_defect * multiplier)
+    # Calculate sample size
+    samples_per_box = units_per_box
+    total_samples = boxes_to_check * samples_per_box
     
-    # Ensure sample size doesn't exceed lot size
-    if backward_sample_size > lot_size:
-        backward_sample_size = lot_size
+    # Calculate probabilities
+    acceptance_probability = (1 - p_aql) ** total_samples * 100
+    beta_risk = stats.binom.cdf(0, total_samples, p_defect) * 100
     
-    # Calculate acceptance probability
-    acceptance_probability = (1 - p_aql) ** backward_sample_size * 100
-    
-    # Calculate beta risk (consumer's risk)
-    beta_risk = stats.binom.cdf(0, backward_sample_size, p_defect) * 100
-    
-    # Statistical justification for multiplier
-    # Based on reducing confidence interval width
-    ci_reduction = (1 - 1/math.sqrt(multiplier)) * 100
+    # Time calculation
+    hours_to_check_back = boxes_to_check / boxes_per_hour
     
     return {
-        'base_sample_size': n_zero_defect,
-        'multiplier': multiplier,
-        'backward_sample_size': backward_sample_size,
+        'boxes_to_check': boxes_to_check,
+        'total_samples': total_samples,
         'risk_level': risk_level,
-        'recommended_batches': recommended_batches,
+        'multiplier': multiplier,
+        'strategy': strategy,
         'acceptance_probability': acceptance_probability,
         'beta_risk': beta_risk,
-        'ratio': ratio,
+        'hours_to_check_back': hours_to_check_back,
         'color': color,
-        'ci_reduction': ci_reduction
+        'base_sample_size': n_zero_defect
     }
 
 # Calculate results
-results = calculate_sample_size(actual_defect_rate, aql_level, confidence_level, lot_size)
+results = calculate_backward_sampling(
+    actual_defect_rate, 
+    aql_level, 
+    confidence_level, 
+    defect_pattern,
+    risk_assessment_method
+)
 
 # Main content area
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.header("📊 Kết Quả Tính Toán")
+    st.header("📊 Kết Quả Phân Tích")
     
     # Key metrics
     metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
     
     with metric_col1:
         st.metric(
-            "Mức Rủi Ro",
-            results['risk_level'],
-            delta=f"Tỷ lệ: {results['ratio']:.1f}x AQL"
+            "Pattern & Rủi Ro",
+            results['risk_level'].split(' - ')[0],
+            delta=results['risk_level'].split(' - ')[1] if ' - ' in results['risk_level'] else ""
         )
     
     with metric_col2:
         st.metric(
-            "Hệ Số Nhân",
-            f"{results['multiplier']}x",
-            delta=f"CI giảm {results['ci_reduction']:.0f}%"
+            "Số Thùng Kiểm Lùi",
+            f"{results['boxes_to_check']:,}",
+            delta=f"{results['hours_to_check_back']:.1f}h sản xuất"
         )
     
     with metric_col3:
         st.metric(
-            "Số Mẫu/Lô",
-            f"{results['backward_sample_size']}",
-            delta=f"Cơ bản: {results['base_sample_size']}"
+            "Tổng Mẫu Kiểm",
+            f"{results['total_samples']:,}",
+            delta=f"{results['total_samples']/units_per_box:.0f} thùng"
         )
     
     with metric_col4:
+        total_hold = int(boxes_per_hour * hold_duration)
         st.metric(
-            "Số Lô Yêu Cầu",
-            f"{results['recommended_batches']} lô",
-            delta=f"Tổng: {results['backward_sample_size'] * results['recommended_batches']} mẫu"
+            "Tổng Hàng Hold",
+            f"{total_hold:,} thùng",
+            delta=f"{hold_duration}h sản xuất"
         )
     
-    # OC Curve
-    st.subheader("📈 Đường Cong OC (Operating Characteristic)")
+    # Pattern explanation
+    if defect_pattern != "Chọn pattern...":
+        st.subheader("📋 Phân Tích Pattern")
+        
+        pattern_info = {
+            "A -": {
+                "desc": "Lỗi tập trung trong 1 hoặc vài thùng",
+                "cause": "Sự cố thiết bị tức thời, nguyên liệu lỗi cục bộ",
+                "action": "Focus kiểm tra ±30 phút quanh thời điểm lỗi"
+            },
+            "B -": {
+                "desc": "Lỗi xuất hiện gián đoạn, không đều",
+                "cause": "Dao động quy trình, thiết bị không ổn định",
+                "action": "Kiểm tra đều theo thời gian, theo dõi trend"
+            },
+            "C -": {
+                "desc": "Lỗi phân bố ngẫu nhiên trên nhiều thùng",
+                "cause": "Vấn đề hệ thống, quy trình không ổn định",
+                "action": "Random sampling toàn bộ, phân tích root cause"
+            }
+        }
+        
+        for key, info in pattern_info.items():
+            if key in defect_pattern:
+                st.info(f"""
+                **Đặc điểm**: {info['desc']}
+                
+                **Nguyên nhân thường gặp**: {info['cause']}
+                
+                **Chiến lược kiểm tra**: {info['action']}
+                """)
+                break
     
-    # Generate OC curve data
-    p_values = np.linspace(0, min(0.1, actual_defect_rate/100 * 2), 100)
-    pa_values = [(1 - p) ** results['backward_sample_size'] for p in p_values]
+    # Visualization
+    st.subheader("📈 Phân Bổ Kiểm Tra Theo Thời Gian")
     
-    fig_oc = go.Figure()
-    fig_oc.add_trace(go.Scatter(
-        x=p_values * 100,
-        y=[pa * 100 for pa in pa_values],
-        mode='lines',
-        name='OC Curve',
-        line=dict(color='blue', width=2)
+    # Create timeline visualization
+    hours_back = np.arange(0, -24, -1)
+    check_intensity = np.zeros_like(hours_back, dtype=float)
+    
+    if "A -" in defect_pattern:
+        # Concentrated around defect time
+        check_intensity[0:4] = 100
+        check_intensity[4:8] = 50
+    elif "B -" in defect_pattern:
+        # Even distribution
+        check_intensity[0:12] = 80
+    elif "C -" in defect_pattern:
+        # Wide distribution
+        check_intensity[0:24] = 60
+    else:
+        check_intensity[0:int(results['hours_to_check_back'])] = 70
+    
+    fig_timeline = go.Figure()
+    fig_timeline.add_trace(go.Bar(
+        x=hours_back,
+        y=check_intensity,
+        name='Mật độ kiểm tra (%)',
+        marker_color=results['color']
     ))
     
-    # Add markers for AQL and actual defect rate
-    fig_oc.add_trace(go.Scatter(
-        x=[aql_level],
-        y=[results['acceptance_probability']],
-        mode='markers',
-        name='AQL',
-        marker=dict(color='green', size=10)
-    ))
-    
-    fig_oc.add_trace(go.Scatter(
-        x=[actual_defect_rate],
-        y=[results['beta_risk']],
-        mode='markers',
-        name='Tỷ lệ lỗi thực tế',
-        marker=dict(color='red', size=10)
-    ))
-    
-    fig_oc.update_layout(
-        title="Xác suất chấp nhận lô theo tỷ lệ lỗi thực",
-        xaxis_title="Tỷ lệ lỗi thực (%)",
-        yaxis_title="Xác suất chấp nhận (%)",
-        hovermode='x unified'
+    fig_timeline.update_layout(
+        title="Phân bố mật độ kiểm tra theo thời gian",
+        xaxis_title="Giờ (từ thời điểm phát hiện lỗi)",
+        yaxis_title="Mật độ kiểm tra (%)",
+        showlegend=False
     )
     
-    st.plotly_chart(fig_oc, use_container_width=True)
+    st.plotly_chart(fig_timeline, use_container_width=True)
 
 with col2:
-    st.header("📋 Hướng Dẫn Thực Hiện")
+    st.header("🎯 Kế Hoạch Hành Động")
     
-    # Create action plan
-    st.info(f"""
-    **Kế hoạch kiểm tra:**
-    1. Kiểm tra **{results['backward_sample_size']} mẫu** từ mỗi lô
-    2. Thực hiện trên **{results['recommended_batches']} lô liên tiếp**
-    3. Tổng cộng: **{results['backward_sample_size'] * results['recommended_batches']} mẫu**
-    4. Điều kiện: **0 lỗi** trong toàn bộ mẫu
-    """)
+    # Action plan
+    st.success(f"**Chiến lược**: {results['strategy']}")
+    
+    # Step by step guide
+    st.subheader("📝 Các bước thực hiện")
+    
+    steps = [
+        f"1. **Hold** {int(boxes_per_hour * hold_duration):,} thùng ({hold_duration}h sản xuất)",
+        f"2. **Lấy mẫu** random 10-20 thùng để confirm pattern",
+        f"3. **Kiểm lùi** {results['boxes_to_check']:,} thùng",
+        f"4. **Điều kiện**: 0 lỗi trong {results['total_samples']:,} mẫu",
+        f"5. **Release** theo batch nếu đạt"
+    ]
+    
+    for step in steps:
+        st.markdown(step)
     
     # Risk assessment
     if results['color'] == 'green':
-        st.success("✅ Rủi ro thấp - Có thể áp dụng kiểm tra thông thường")
+        st.success("✅ Rủi ro thấp - Có thể release phần xa thời điểm lỗi")
     elif results['color'] == 'yellow':
-        st.warning("⚠️ Rủi ro trung bình - Cần giám sát chặt chẽ")
+        st.warning("⚠️ Rủi ro trung bình - Release theo batch, monitor tiếp")
     elif results['color'] == 'orange':
-        st.warning("⚠️ Rủi ro cao - Yêu cầu hành động khắc phục")
+        st.warning("⚠️ Rủi ro cao - Cần xác định root cause")
     else:
-        st.error("🚨 Rủi ro rất cao - Cần dừng sản xuất và điều tra")
+        st.error("🚨 Rủi ro rất cao - Hold thêm, phân tích hệ thống")
 
-# Statistical justification section
-with st.expander("🔬 Cơ Sở Khoa Học Cho Hệ Số Nhân"):
+# Release Strategy
+st.header("📦 Chiến Lược Release")
+
+col_rel1, col_rel2 = st.columns(2)
+
+with col_rel1:
+    st.subheader("Thứ tự ưu tiên release:")
+    
+    release_priority = pd.DataFrame({
+        'Thứ tự': [1, 2, 3, 4],
+        'Khoảng thời gian': [
+            f'{int(results["hours_to_check_back"])}-{int(hold_duration)}h trước',
+            f'{int(results["hours_to_check_back"]/2)}-{int(results["hours_to_check_back"])}h trước',
+            f'2-{int(results["hours_to_check_back"]/2)}h trước',
+            '0-2h gần nhất'
+        ],
+        'Điều kiện': [
+            f'{int(results["boxes_to_check"]/4)} thùng OK',
+            f'{int(results["boxes_to_check"]/2)} thùng OK',
+            f'{int(results["boxes_to_check"]*3/4)} thùng OK',
+            f'{results["boxes_to_check"]} thùng OK'
+        ]
+    })
+    
+    st.dataframe(release_priority, hide_index=True)
+
+with col_rel2:
+    st.subheader("Quyết định theo Pattern:")
+    
+    decision_matrix = {
+        "Pattern A": "Release phần xa thời điểm lỗi trước",
+        "Pattern B": "Release theo batch nhỏ, monitor",
+        "Pattern C": "Chờ root cause, release thận trọng"
+    }
+    
+    for pattern, decision in decision_matrix.items():
+        if pattern[0] in str(defect_pattern):
+            st.info(f"**{pattern}**: {decision}")
+
+# Statistical justification
+with st.expander("🔬 Cơ Sở Thống Kê"):
     st.markdown(f"""
-    ### Lý do thống kê cho hệ số nhân {results['multiplier']}x:
+    ### Tính toán dựa trên:
     
-    1. **Giảm độ rộng khoảng tin cậy**: 
-       - Với cỡ mẫu n → {results['multiplier']}n
-       - Độ rộng CI giảm: {results['ci_reduction']:.1f}%
-       - Công thức: CI width ∝ 1/√n
+    1. **Độ tin cậy {confidence_level}%**:
+       - Cần {results['base_sample_size']} mẫu zero-defect cơ bản
+       - Pattern factor: ×{results['multiplier']}
+       - Tổng: {results['total_samples']:,} mẫu
     
-    2. **Tăng Power của test (1-β)**:
-       - Power = khả năng phát hiện lỗi thực sự
-       - Với n={results['base_sample_size']}: Power ≈ {(1-stats.binom.cdf(0, results['base_sample_size'], actual_defect_rate/100))*100:.1f}%
-       - Với n={results['backward_sample_size']}: Power ≈ {(1-results['beta_risk']/100)*100:.1f}%
+    2. **Xác suất chấp nhận**:
+       - Tại AQL: {results['acceptance_probability']:.2f}%
+       - Beta risk: {results['beta_risk']:.2f}%
     
-    3. **Nguyên tắc Switching Rules (ISO 2859)**:
-       - Normal → Tightened: khi 2/5 lô bị reject
-       - Tightened sampling = 1.5-2x normal sampling
-       - Backward sampling cần nghiêm ngặt hơn → {results['multiplier']}x
-    
-    4. **Cân bằng Risk**:
-       - Producer's risk (α): {100-results['acceptance_probability']:.1f}% tại AQL
-       - Consumer's risk (β): {results['beta_risk']:.1f}% tại tỷ lệ lỗi thực tế
+    3. **Logic Pattern-based**:
+       - Lỗi tập trung → Vấn đề cục bộ → Ít mẫu
+       - Lỗi rời rạc → Vấn đề hệ thống → Nhiều mẫu
+       - Cân bằng risk vs efficiency
     """)
 
 # Recommendations
-st.header("💡 Khuyến Nghị Cải Tiến")
+st.header("💡 Khuyến Nghị")
 
 col_rec1, col_rec2 = st.columns(2)
 
 with col_rec1:
-    st.subheader("Hành động ngay lập tức:")
-    st.markdown("""
-    - 🔍 Phân tích 5 Why cho nguyên nhân gốc
-    - 🛠️ Kiểm tra và hiệu chuẩn thiết bị
-    - 👥 Đào tạo lại nhân viên vận hành
-    - 📊 Tăng tần suất kiểm tra in-process
-    """)
+    st.subheader("Hành động ngay:")
+    actions = {
+        "A -": [
+            "🔍 Check thiết bị tại thời điểm lỗi",
+            "📦 Verify nguyên liệu cùng batch",
+            "👥 Phỏng vấn operator ca đó",
+            "🛠️ Calibrate thiết bị liên quan"
+        ],
+        "B -": [
+            "📊 Phân tích trend 24h",
+            "🔄 Check cycle time variations",
+            "🌡️ Monitor environmental conditions",
+            "⚙️ Review maintenance log"
+        ],
+        "C -": [
+            "🏭 Stop & investigate system",
+            "📋 Full process audit",
+            "🔬 Lab test samples",
+            "👨‍🏫 Retrain all operators"
+        ]
+    }
+    
+    for key, items in actions.items():
+        if key in str(defect_pattern):
+            for item in items:
+                st.markdown(item)
+            break
 
 with col_rec2:
     st.subheader("Cải tiến dài hạn:")
     st.markdown("""
-    - 📈 Triển khai SPC cho critical parameters
-    - 🎯 Đánh giá lại tiêu chuẩn AQL
-    - 🔄 Cải tiến quy trình (DMAIC/Kaizen)
-    - 📱 Số hóa hệ thống ghi nhận dữ liệu
+    - 📈 Triển khai SPC real-time
+    - 🎯 Review & update AQL
+    - 🔄 Standardize process (SOP)
+    - 📱 Digital tracking system
+    - 🤖 Auto defect detection
     """)
 
 # Export results
 st.header("📥 Xuất Báo Cáo")
 
+# Prepare comprehensive report
 report_data = {
-    'Thông số': ['Tỷ lệ lỗi thực tế (%)', 'AQL (%)', 'Độ tin cậy (%)', 
-                 'Mức rủi ro', 'Hệ số nhân', 'Số mẫu/lô', 
-                 'Số lô yêu cầu', 'Tổng mẫu cần kiểm'],
-    'Giá trị': [actual_defect_rate, aql_level, confidence_level,
-                results['risk_level'], results['multiplier'], 
-                results['backward_sample_size'], results['recommended_batches'],
-                results['backward_sample_size'] * results['recommended_batches']]
+    'Thông số': [
+        'Pattern lỗi',
+        'Tổng lỗi phát hiện',
+        'Tổng mẫu đã kiểm',
+        'Tỷ lệ lỗi thực tế (%)',
+        'AQL (%)',
+        'Độ tin cậy (%)',
+        'Mức rủi ro',
+        'Số thùng kiểm lùi',
+        'Tổng mẫu cần kiểm',
+        'Thời gian kiểm lùi (h)',
+        'Chiến lược'
+    ],
+    'Giá trị': [
+        defect_pattern,
+        total_defects,
+        sample_size_checked,
+        f"{actual_defect_rate:.2f}",
+        aql_level,
+        confidence_level,
+        results['risk_level'],
+        results['boxes_to_check'],
+        results['total_samples'],
+        f"{results['hours_to_check_back']:.1f}",
+        results['strategy']
+    ]
 }
 
 df_report = pd.DataFrame(report_data)
@@ -349,6 +534,6 @@ st.download_button(
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center'>
-    <p>Phát triển bởi QA Team | Dựa trên ISO 2859-1:2020 & Statistical Theory</p>
+    <p>Phát triển bởi QA Team | Pattern-based Backward Sampling v2.0</p>
 </div>
 """, unsafe_allow_html=True)
